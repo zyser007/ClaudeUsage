@@ -8,3 +8,5 @@ ClaudeUsage.app/
 Resources/AppIcon-master.png
 
 .DS_Store
+.build-arm/
+.build-x86/

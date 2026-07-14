@@ -31,6 +31,12 @@ open ClaudeUsage.app
 `build.sh` works without the certificate too; it just falls back to ad-hoc
 signing and says so.
 
+`./build.sh --universal` produces an arm64 + x86_64 bundle instead of a native
+one. It builds each slice with `--triple` and `lipo`s them together, because
+`swift build --arch a --arch b` needs xcbuild from full Xcode while `--triple`
+only needs the Command Line Tools. It takes about twice as long, so it isn't the
+default.
+
 ## Where the numbers come from
 
 Two independent sources, on two different clocks — the UI labels which is which,
@@ -80,6 +86,41 @@ makes the requirement `(bundle id + certificate root)`, which survives rebuilds.
 The certificate is self-signed, lives only in your login keychain, is **not**
 added to the system trust store, and is **not** a trusted root — `codesign` does
 not need any of that. Its only capability is Code Signing.
+
+## Distribution — build it, don't hand the bundle over
+
+**Sending someone the built `ClaudeUsage.app` does not work.** Have them clone
+and run `./build.sh` instead. This is not caution; it's what the tools report:
+
+```
+$ spctl -a -vvv ClaudeUsage.app
+ClaudeUsage.app: rejected
+origin=ClaudeUsage Self-Signed
+```
+
+Gatekeeper rejects it because the signing certificate exists only in the
+keychain of the machine that built it. Nobody else's Mac has ever seen it, and
+it is deliberately not a trusted root. Stripping the quarantine attribute does
+not help — the assessment still comes back `rejected`, because the problem is
+the certificate, not where the file came from.
+
+Your own build runs fine despite that same `rejected` verdict, which looks like
+a contradiction until you notice Gatekeeper only *enforces* on quarantined
+files. A locally built bundle was never quarantined, so it is never checked. The
+identical bundle arriving by AirDrop or chat is. Same bytes, different outcome.
+
+A recipient can force it (`xattr -cr ClaudeUsage.app`, then System Settings →
+Privacy & Security → Open Anyway), but that teaches someone to wave through the
+exact warning that protects them. Building from source costs less and skips the
+problem entirely — no quarantine, no Gatekeeper, and their own architecture.
+
+Distributing binaries properly means an Apple Developer Program membership
+($99/yr), a Developer ID certificate, and notarization. That is the only path
+that makes a downloaded copy open on a first double-click.
+
+They will also need macOS 14+, Claude Code installed and used at least once
+(otherwise there is no `~/.claude.json` to read), and — if you *do* ship a
+bundle — an arm64 Mac, unless it was built with `--universal`.
 
 ## Icons
 

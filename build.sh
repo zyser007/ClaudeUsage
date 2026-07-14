@@ -1,15 +1,39 @@
 #!/bin/bash
 # Builds ClaudeUsage.app — a menu-bar-only app (LSUIElement, no Dock icon).
+#
+#   ./build.sh              native only — matches this Mac, fastest
+#   ./build.sh --universal  arm64 + x86_64, for a bundle that also runs on Intel
 set -euo pipefail
 cd "$(dirname "$0")"
 
 APP="ClaudeUsage.app"
+UNIVERSAL=false
+[ "${1:-}" = "--universal" ] && UNIVERSAL=true
 
-swift build -c release
+if $UNIVERSAL; then
+    # `swift build --arch a --arch b` would be the obvious way, but it needs
+    # xcbuild from full Xcode; --triple only needs the Command Line Tools, so
+    # build each slice separately and lipo them. Separate scratch paths keep the
+    # two from overwriting each other's artifacts.
+    echo "building arm64…"
+    swift build -c release --triple arm64-apple-macosx14.0 --scratch-path .build-arm
+    echo "building x86_64…"
+    swift build -c release --triple x86_64-apple-macosx14.0 --scratch-path .build-x86
+    BIN=$(mktemp -t ClaudeUsage)
+    lipo -create \
+        .build-arm/arm64-apple-macosx/release/ClaudeUsage \
+        .build-x86/x86_64-apple-macosx/release/ClaudeUsage \
+        -output "$BIN"
+else
+    swift build -c release
+    BIN=.build/release/ClaudeUsage
+fi
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp .build/release/ClaudeUsage "$APP/Contents/MacOS/ClaudeUsage"
+cp "$BIN" "$APP/Contents/MacOS/ClaudeUsage"
+$UNIVERSAL && rm -f "$BIN"
+echo "architectures: $(lipo -archs "$APP/Contents/MacOS/ClaudeUsage")"
 
 # Optional custom menu bar icon. Without it the app falls back to an SF Symbol.
 if [ -f Resources/MenuIcon.png ]; then
