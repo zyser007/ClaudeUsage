@@ -10,6 +10,9 @@ struct ClaudeUsageApp: App {
         if CommandLine.arguments.contains("--dump") {
             UsageStore.dumpAndExit()
         }
+        if CommandLine.arguments.contains("--race-test") {
+            MainActor.assumeIsolated { UsageStore.raceTestAndExit() }
+        }
         if CommandLine.arguments.contains("--login-status") {
             LaunchAtLogin.printStatus()
         }

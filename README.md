@@ -37,12 +37,31 @@ one. It builds each slice with `--triple` and `lipo`s them together, because
 only needs the Command Line Tools. It takes about twice as long, so it isn't the
 default.
 
-`./build.sh --install` also copies the bundle to `/Applications` and relaunches
-it from there. Worth doing before turning on Launch at Login: the login item
-records the bundle's path, so a checkout that later moves or gets deleted leaves
-a login item pointing at nothing. Re-run it after any rebuild you want the
+`./build.sh --install` additionally assembles the production bundle into
+`/Applications` and launches it. Re-run it after any rebuild you want the
 installed copy to pick up — otherwise `/Applications` keeps running the old
 build.
+
+### Two bundles, two identifiers
+
+| | path | identifier |
+|---|---|---|
+| dev | `./ClaudeUsage.app` | `local.claude-usage.dev` |
+| production | `/Applications/ClaudeUsage.app` | `local.claude-usage` |
+
+Turn on Launch at Login in the production copy. The login item records the
+bundle's path, and this folder is one `build.sh` away from being deleted and
+recreated.
+
+The identifiers differ because macOS keys a login item to the *identifier* and
+records whichever bundle carrying it launched last. While both copies shared one
+id, merely opening the dev build repointed Launch at Login at this folder —
+verified by setting the login item to `/Applications`, opening the dev copy, and
+watching it follow. Nothing in the app requests that; it is what launching does.
+Separate ids make it structurally impossible rather than a rule to remember,
+and give each copy its own TCC identity.
+
+Both can run at once — you'll see two menu bar items.
 
 ## Where the numbers come from
 
@@ -145,14 +164,24 @@ The app can run its own code paths headlessly, which is how the behaviour above
 was checked rather than assumed:
 
 ```sh
-./.build/release/ClaudeUsage --dump          # scan + pricing, per bucket
-./.build/release/ClaudeUsage --live-test     # CLI discovery + spawn, did the snapshot move?
-./ClaudeUsage.app/Contents/MacOS/ClaudeUsage --login-status  # read the login item
-./ClaudeUsage.app/Contents/MacOS/ClaudeUsage --login-test    # register/unregister, restores prior state
+./.build/release/ClaudeUsage --dump        # scan + pricing, per bucket
+./.build/release/ClaudeUsage --live-test   # CLI discovery + spawn, did the snapshot move?
+./.build/release/ClaudeUsage --race-test   # overlapping refreshes must not double-count
 ```
 
-The two login flags must run from inside the `.app` — `SMAppService.mainApp`
-resolves against the enclosing bundle, and the bare binary in `.build` has none.
+The login flags must run from inside a `.app` — `SMAppService.mainApp` resolves
+against the enclosing bundle, and the bare binary in `.build` has none. Run them
+against the copy you actually mean: each bundle reports and changes only its own
+identifier's login item.
+
+```sh
+/Applications/ClaudeUsage.app/Contents/MacOS/ClaudeUsage --login-status  # read it
+/Applications/ClaudeUsage.app/Contents/MacOS/ClaudeUsage --login-test    # register/unregister, restores prior state
+```
+
+`--login-test` restores the state it found, but it registers *the bundle it runs
+from* — that is what `SMAppService.mainApp` means. Running it from the dev copy
+does not touch production's login item, because the identifiers differ.
 
 ## Privacy
 

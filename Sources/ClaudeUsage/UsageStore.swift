@@ -58,6 +58,8 @@ final class UsageStore: ObservableObject {
     /// `cwd` and reused so incremental scans keep a stable bucket key.
     private var projectNames: [String: String] = [:]
     private var timer: Timer?
+    /// Guards against overlapping scans double-counting — see refresh().
+    private var isScanning = false
 
     private let projectsRoot = URL(fileURLWithPath: NSHomeDirectory())
         .appendingPathComponent(".claude/projects")
@@ -73,13 +75,31 @@ final class UsageStore: ObservableObject {
         }
     }
 
+    /// Drops the request if a scan is already running.
+    ///
+    /// Not an optimisation — a correctness guard. scan() is deterministic for a
+    /// given offset map, and apply() *adds* what it returns. Two overlapping
+    /// scans both start from the same offsets, both read the same new bytes, and
+    /// both get added: every token in that window counts twice. Nothing detects
+    /// it afterwards; the totals are simply wrong and still look plausible.
+    ///
+    /// Skipping is safe. The offsets aren't advanced until a scan lands, so
+    /// whatever this call would have read is still unread, and the running scan
+    /// or the next tick picks it up.
     func refresh() {
+        guard !isScanning else { return }
+        isScanning = true
         let root = projectsRoot
         let known = offsets
         let knownNames = projectNames
         Task.detached(priority: .utility) {
             let result = Self.scan(root: root, offsets: known, names: knownNames)
-            await MainActor.run { self.apply(result) }
+            await MainActor.run {
+                // Clear before apply so a throwing apply can't wedge the flag on
+                // and freeze every future refresh.
+                self.isScanning = false
+                self.apply(result)
+            }
         }
     }
 
@@ -238,6 +258,36 @@ final class UsageStore: ObservableObject {
             }
         }
         return result
+    }
+
+    /// Fires overlapping refreshes at a real store and checks the totals are
+    /// still right. Without the guard in refresh() this double-counts, and the
+    /// wrong number looks entirely plausible — which is exactly why it needs a
+    /// test rather than a careful reading.
+    @MainActor static func raceTestAndExit() -> Never {
+        let expected = scan(root: URL(fileURLWithPath: NSHomeDirectory())
+            .appendingPathComponent(".claude/projects"), offsets: [:], names: [:])
+        let calendar = Calendar(identifier: .gregorian)
+        let today = calendar.startOfDay(for: Date())
+        var want = Tokens()
+        for (key, tokens) in expected.buckets where key.day == today { want += tokens }
+        print("one clean scan:      \(want.total) tokens")
+
+        let store = UsageStore()
+        // Same tick, before any of them can land — the overlap the guard exists
+        // for. A click landing on a timer tick is this, just rarer.
+        for _ in 0..<5 { store.refresh() }
+        RunLoop.main.run(until: Date().addingTimeInterval(4))
+
+        let got = store.todayTokens.total
+        print("after 5x refresh():  \(got) tokens")
+        if got == want.total {
+            print("✅ no double-count")
+            exit(0)
+        }
+        let ratio = want.total > 0 ? Double(got) / Double(want.total) : 0
+        print("❌ counted \(String(format: "%.1f", ratio))x — the guard is not holding")
+        exit(1)
     }
 
     /// Runs the real scan + pricing path and prints the result. Used to verify
