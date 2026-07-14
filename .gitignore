@@ -1,0 +1,10 @@
+# Swift build products (~550MB)
+.build/
+
+# Built bundle — produced by ./build.sh
+ClaudeUsage.app/
+
+# Intermediate for the icns; ./make-appicon.py regenerates it from MenuIcon.png
+Resources/AppIcon-master.png
+
+.DS_Store
