@@ -75,7 +75,7 @@ struct MenuContentView: View {
             }
 
             if !quota.available {
-                Text("ยังไม่มีข้อมูลโควตาใน ~/.claude.json — เปิด Claude Code สักครั้งก่อน")
+                Text("No quota data in ~/.claude.json yet — open Claude Code once first")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
@@ -96,13 +96,15 @@ struct MenuContentView: View {
     private var snapshotHelp: String {
         quota.canRefreshLive
             ? """
-              วัดเมื่อ \(quota.ageDescription) · อัปเดตอัตโนมัติทุก ~6 นาที \
-              โดยสั่ง claude -p "/usage" (ไม่กินโควตา) กด Refresh เพื่ออัปเดตทันที
+              Measured \(quota.ageDescription) · refreshed automatically every \
+              ~6 min by running claude -p "/usage", which costs no quota. \
+              Press Refresh to update now.
               """
             : """
-              ตัวเลข % เป็นค่าที่ Claude Code วัดไว้ \(quota.ageDescription) \
-              ไม่พบ claude CLI ในเครื่อง แอปเลยสั่งอัปเดตเองไม่ได้ \
-              ต้องรอ Claude Code เขียนค่าใหม่ (ปกติ 15–45 นาที)
+              These percentages are what Claude Code measured \
+              \(quota.ageDescription). No claude CLI found here, so the app \
+              can't refresh them itself — it has to wait for Claude Code to \
+              write new values (usually 15–45 min).
               """
     }
 
@@ -162,7 +164,7 @@ struct MenuContentView: View {
     /// 22pt made ordinary sessions look alarming.
     private var header: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text("วันนี้ (คำนวณจาก transcript)")
+            Text("Today (from transcripts)")
                 .font(.caption).foregroundStyle(.secondary)
             // Cost only — the output-token count lives in the breakdown below,
             // so repeating it here (rounded differently) just read as noise.
@@ -174,7 +176,7 @@ struct MenuContentView: View {
                 .font(.system(size: 24, weight: .semibold, design: .rounded))
                 .monospacedDigit()
                 .help(quota.isSubscription
-                      ? "ราคาถ้าจ่ายแบบ API — แพลนเหมาจ่ายไม่ได้ถูกตัดเงินนี้"
+                      ? "What these tokens would cost at API rates — your subscription is not charged this"
                       : "")
         }
     }
@@ -196,7 +198,7 @@ struct MenuContentView: View {
             ForEach(rows, id: \.0) { row($0.0, $0.1) }
             if !rows.isEmpty {
                 Divider().padding(.vertical, 1)
-                row("รวม", t.total, emphasised: true)
+                row("Total", t.total, emphasised: true)
             }
         }
     }
@@ -216,7 +218,7 @@ struct MenuContentView: View {
     @ViewBuilder
     private var projects: some View {
         if store.todayByProject.isEmpty {
-            Text("ยังไม่มี usage วันนี้")
+            Text("No usage today yet")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         } else {
@@ -257,7 +259,7 @@ struct MenuContentView: View {
     private var sparkline: some View {
         let peak = store.last7Days.map(\.cost).max() ?? 0
         return VStack(alignment: .leading, spacing: 6) {
-            Text("7 วันล่าสุด (ราคาต่อวัน)")
+            Text("Last 7 days (cost per day)")
                 .font(.caption).foregroundStyle(.secondary)
             // Top padding reserves room for the floating label so it doesn't
             // collide with the header above.
@@ -282,7 +284,7 @@ struct MenuContentView: View {
                         // above the bar. Faster and better-placed than .help().
                         .overlay(alignment: .top) {
                             if hoveredDay == d.day {
-                                Text(d.cost > 0 ? Format.money(d.cost) : "ไม่มีใช้งาน")
+                                Text(d.cost > 0 ? Format.money(d.cost) : "No usage")
                                     .font(.system(size: 9, weight: .semibold))
                                     .monospacedDigit()
                                     .fixedSize()
@@ -310,7 +312,7 @@ struct MenuContentView: View {
                     }
                     .help(d.cost > 0
                           ? "\(Format.money(d.cost)) · \(Format.fullTokens(d.tokens.total)) tokens"
-                          : "ไม่มีการใช้งาน")
+                          : "No usage")
                 }
             }
             .padding(.top, 16)
@@ -329,7 +331,7 @@ struct MenuContentView: View {
             HStack {
                 // Named explicitly: this is the transcript scan, a different
                 // clock from the quota snapshot stamped in the USAGE header.
-                Text("สแกน transcript \(store.lastRefresh, format: .dateTime.hour().minute().second())")
+                Text("Scanned \(store.lastRefresh, format: .dateTime.hour().minute().second())")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -355,11 +357,10 @@ struct MenuContentView: View {
     }
 
     private func dayLabel(_ d: Date) -> String {
-        // Today is spelled out — the single-letter อ (Tue) is easily misread as
-        // อา (Sun), and the highlighted bar is the one that must be unambiguous.
-        if isToday(d) { return "วันนี้" }
-        // Thai weekday abbreviations, to match the Thai section header.
-        let symbols = ["อา", "จ", "อ", "พ", "พฤ", "ศ", "ส"]
+        // Today is named, not abbreviated: it's the highlighted bar and the one
+        // a glance has to land on without counting backwards from Saturday.
+        if isToday(d) { return "Today" }
+        let symbols = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
         let weekday = Calendar(identifier: .gregorian).component(.weekday, from: d)
         return symbols[(weekday - 1) % 7]
     }

@@ -150,7 +150,7 @@ final class UsageStore: ObservableObject {
         guard let projectDirs = try? fm.contentsOfDirectory(
             at: root, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
         ) else {
-            result.error = "ไม่พบ ~/.claude/projects"
+            result.error = "~/.claude/projects not found"
             return result
         }
 

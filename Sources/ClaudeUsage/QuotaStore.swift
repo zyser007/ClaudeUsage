@@ -51,23 +51,24 @@ final class QuotaStore: ObservableObject {
     /// Stamping the section with the measurement time makes that visible rather
     /// than something the user has to infer.
     var snapshotLabel: String {
-        guard let fetchedAt else { return "ยังไม่เคยวัด" }
+        guard let fetchedAt else { return "Never measured" }
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.calendar = Calendar(identifier: .gregorian)
         f.dateFormat = "HH:mm"
-        return "วัดไว้ \(f.string(from: fetchedAt))"
+        return "Measured \(f.string(from: fetchedAt))"
     }
 
-    /// Human-readable age, used in the tooltip and the stale warning.
+    /// Human-readable age, used in the tooltip and the stale warning. Phrased to
+    /// read as a fragment ("5 min ago"), since callers embed it mid-sentence.
     var ageDescription: String {
-        guard let fetchedAt else { return "ยังไม่เคยดึงข้อมูล" }
+        guard let fetchedAt else { return "never" }
         let mins = Int(Date().timeIntervalSince(fetchedAt) / 60)
-        if mins < 1 { return "เพิ่งอัปเดต" }
-        if mins < 60 { return "\(mins) นาทีที่แล้ว" }
+        if mins < 1 { return "just now" }
+        if mins < 60 { return "\(mins) min ago" }
         let hours = mins / 60
-        if hours < 24 { return "\(hours) ชม.ที่แล้ว" }
-        return "\(hours / 24) วันที่แล้ว"
+        if hours < 24 { return "\(hours) hr ago" }
+        return "\(hours / 24) days ago"
     }
 
     /// Subscription plans aren't billed per token, so the cost figure computed
@@ -192,7 +193,7 @@ final class QuotaStore: ObservableObject {
         process.standardInput = FileHandle.nullDevice
 
         do { try process.run() } catch {
-            return "รัน claude ไม่ได้: \(error.localizedDescription)"
+            return "Couldn't run claude: \(error.localizedDescription)"
         }
 
         // Watchdog: measured runs finish in 1–3s. A hung CLI must not leak a
@@ -201,11 +202,11 @@ final class QuotaStore: ObservableObject {
         while process.isRunning, Date() < deadline { usleep(100_000) }
         if process.isRunning {
             process.terminate()
-            return "claude -p /usage ค้างเกิน 20 วิ"
+            return "claude -p /usage hung for over 20s"
         }
         return process.terminationStatus == 0
             ? nil
-            : "claude -p /usage ล้มเหลว (exit \(process.terminationStatus))"
+            : "claude -p /usage failed (exit \(process.terminationStatus))"
     }
 
     func refresh() {
