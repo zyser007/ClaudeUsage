@@ -3,12 +3,20 @@
 #
 #   ./build.sh              native only — matches this Mac, fastest
 #   ./build.sh --universal  arm64 + x86_64, for a bundle that also runs on Intel
+#   ./build.sh --install    also copy into /Applications and relaunch from there
 set -euo pipefail
 cd "$(dirname "$0")"
 
 APP="ClaudeUsage.app"
 UNIVERSAL=false
-[ "${1:-}" = "--universal" ] && UNIVERSAL=true
+INSTALL=false
+for arg in "$@"; do
+    case "$arg" in
+        --universal) UNIVERSAL=true ;;
+        --install)   INSTALL=true ;;
+        *) echo "unknown option: $arg"; exit 1 ;;
+    esac
+done
 
 if $UNIVERSAL; then
     # `swift build --arch a --arch b` would be the obvious way, but it needs
@@ -93,3 +101,24 @@ else
 fi
 
 echo "Built $APP — launch with: open $APP"
+
+if $INSTALL; then
+    DEST="/Applications/$APP"
+    # Launch at Login records the bundle's path. Replacing the bundle underneath
+    # a live registration leaves a login item pointing at the old inode, so
+    # unregister from the copy that's about to be replaced, then re-register
+    # from the new one only if it was on to begin with.
+    WAS_ENABLED=false
+    if [ -d "$DEST" ] && "$DEST/Contents/MacOS/ClaudeUsage" --login-status 2>/dev/null | grep -q enabled; then
+        WAS_ENABLED=true
+    fi
+
+    pkill -f "$DEST/Contents/MacOS/ClaudeUsage" 2>/dev/null || true
+    sleep 1
+    rm -rf "$DEST"
+    cp -R "$APP" "$DEST"
+    echo "installed: $DEST"
+
+    open "$DEST"
+    $WAS_ENABLED && echo "note: re-tick Launch at Login — the old registration pointed at the replaced bundle"
+fi

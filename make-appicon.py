@@ -10,7 +10,7 @@ import struct, zlib, sys, os
 def read_rgba(path):
     data = open(path, 'rb').read()
     if data[:8] != b'\x89PNG\r\n\x1a\n':
-        sys.exit(f"{path}: ไม่ใช่ไฟล์ PNG")
+        sys.exit(f"{path}: not a PNG")
     pos, idat, plte, trns = 8, b'', None, None
     w = h = ct = None
     while pos < len(data):
@@ -20,7 +20,7 @@ def read_rgba(path):
         if typ == b'IHDR':
             w, h, bd, ct = struct.unpack('>IIBB', c[:10])
             if bd != 8:
-                sys.exit(f"รองรับเฉพาะ bit depth 8 (ไฟล์นี้ {bd})")
+                sys.exit(f"only 8-bit depth is supported (this file is {bd})")
         elif typ == b'PLTE': plte = c
         elif typ == b'tRNS': trns = c
         elif typ == b'IDAT': idat += c
@@ -83,7 +83,7 @@ def trim(w, h, px):
                 minx = min(minx, x); maxx = max(maxx, x)
                 miny = min(miny, y); maxy = max(maxy, y)
     if maxx < minx:
-        sys.exit("ภาพโปร่งใสทั้งหมด")
+        sys.exit("image is fully transparent")
     cw, chh = maxx-minx+1, maxy-miny+1
     out = bytearray(cw*chh*4)
     for y in range(chh):
@@ -113,7 +113,7 @@ def main():
 
     w, h, px = read_rgba(src)
     cw, ch, cpx = trim(w, h, px)
-    print(f"source {w}x{h} → ตัดขอบโปร่งใสเหลือ {cw}x{ch}")
+    print(f"source {w}x{h} → trimmed to {cw}x{ch}")
 
     box = int(SIZE * (1 - 2*PAD))
     scale = min(box / cw, box / ch)

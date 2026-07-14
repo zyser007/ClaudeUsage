@@ -281,7 +281,7 @@ final class QuotaStore: ObservableObject {
     /// so this is the only way to see it fail.
     nonisolated static func liveTest() -> Never {
         let url = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".claude.json")
-        print("cliPath: \(cliPath ?? "ไม่พบ claude CLI")")
+        print("cliPath: \(cliPath ?? "no claude CLI found")")
         guard let path = cliPath else { exit(1) }
 
         let before = read(url: url).fetchedAt
@@ -289,7 +289,7 @@ final class QuotaStore: ObservableObject {
 
         let started = Date()
         let error = runUsageCommand(path: path)
-        print("ใช้เวลา: \(String(format: "%.2f", Date().timeIntervalSince(started)))s")
+        print("took: \(String(format: "%.2f", Date().timeIntervalSince(started)))s")
         print("error: \(error ?? "none")")
 
         let after = read(url: url).fetchedAt
@@ -297,8 +297,8 @@ final class QuotaStore: ObservableObject {
         if let b = before, let a = after {
             let moved = a.timeIntervalSince(b)
             print(moved > 0
-                  ? "✅ snapshot ขยับ +\(Int(moved))s"
-                  : "⚠️ snapshot ไม่ขยับ (CLI throttle: cache ยังใหม่อยู่)")
+                  ? "✅ snapshot moved +\(Int(moved))s"
+                  : "⚠️ snapshot unchanged (CLI throttled: cache still fresh)")
         }
         exit(0)
     }
@@ -311,7 +311,7 @@ final class QuotaStore: ObservableObject {
         print("Plan: \(snap.plan ?? "—")")
         print("available: \(snap.available)")
         if let f = snap.fetchedAt {
-            print("fetchedAt: \(f)  (อายุ \(Int(Date().timeIntervalSince(f))) วินาที)")
+            print("fetchedAt: \(f)  (\(Int(Date().timeIntervalSince(f)))s old)")
         }
         print("--- limits ---")
         for l in snap.limits {

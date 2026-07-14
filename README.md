@@ -37,6 +37,13 @@ one. It builds each slice with `--triple` and `lipo`s them together, because
 only needs the Command Line Tools. It takes about twice as long, so it isn't the
 default.
 
+`./build.sh --install` also copies the bundle to `/Applications` and relaunches
+it from there. Worth doing before turning on Launch at Login: the login item
+records the bundle's path, so a checkout that later moves or gets deleted leaves
+a login item pointing at nothing. Re-run it after any rebuild you want the
+installed copy to pick up — otherwise `/Applications` keeps running the old
+build.
+
 ## Where the numbers come from
 
 Two independent sources, on two different clocks — the UI labels which is which,
@@ -62,8 +69,8 @@ The app never parses the CLI's printed panel; it only uses the command for its
 side effect and reads the JSON it writes. Display text changes between releases,
 structured data doesn't.
 
-The snapshot time is always on screen (`วัดไว้ HH:mm`) because a percentage that
-can be minutes stale should say so.
+The snapshot time is always on screen (`Measured HH:mm`) because a percentage
+that can be minutes stale should say so.
 
 ### Cost is notional on a subscription
 
@@ -138,10 +145,14 @@ The app can run its own code paths headlessly, which is how the behaviour above
 was checked rather than assumed:
 
 ```sh
-./.build/release/ClaudeUsage --dump        # scan + pricing, per bucket
-./.build/release/ClaudeUsage --live-test   # CLI discovery + spawn, did the snapshot move?
-./.build/release/ClaudeUsage --login-test  # SMAppService register/unregister
+./.build/release/ClaudeUsage --dump          # scan + pricing, per bucket
+./.build/release/ClaudeUsage --live-test     # CLI discovery + spawn, did the snapshot move?
+./ClaudeUsage.app/Contents/MacOS/ClaudeUsage --login-status  # read the login item
+./ClaudeUsage.app/Contents/MacOS/ClaudeUsage --login-test    # register/unregister, restores prior state
 ```
+
+The two login flags must run from inside the `.app` — `SMAppService.mainApp`
+resolves against the enclosing bundle, and the bare binary in `.build` has none.
 
 ## Privacy
 

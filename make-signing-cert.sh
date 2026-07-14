@@ -17,8 +17,8 @@ NAME="ClaudeUsage Self-Signed"
 KEYCHAIN="$HOME/Library/Keychains/login.keychain-db"
 
 if security find-certificate -c "$NAME" >/dev/null 2>&1; then
-    echo "มีอยู่แล้ว: $NAME"
-    echo "ถ้าจะสร้างใหม่ ลบของเดิมก่อน:"
+    echo "already exists: $NAME"
+    echo "to recreate it, remove the old one first:"
     echo "  security delete-certificate -c \"$NAME\""
     exit 0
 fi
@@ -43,6 +43,6 @@ openssl pkcs12 -export -inkey "$TMP/key.pem" -in "$TMP/cert.pem" \
 security import "$TMP/identity.p12" -k "$KEYCHAIN" -P cu -T /usr/bin/codesign
 
 echo
-echo "สร้างแล้ว: $NAME (อายุ 10 ปี, ใช้ได้เฉพาะ code signing)"
-echo "รัน ./build.sh ได้เลย — ครั้งแรกที่ codesign ใช้กุญแจนี้"
-echo "keychain จะถามหนึ่งครั้ง กด \"Always Allow\" เพื่อไม่ให้ถามอีก"
+echo "created: $NAME (valid 10 years, code signing only)"
+echo "run ./build.sh now. The first time codesign uses this key,"
+echo "the keychain asks once — choose \"Always Allow\" to stop it asking again."
