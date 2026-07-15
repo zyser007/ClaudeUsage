@@ -17,11 +17,37 @@ enum MenuIcon {
     /// font.
     private static let trailingGap: CGFloat = 4
 
-    static let image: NSImage? = {
+    /// Headroom for the hop. The canvas is this much taller than the art, and
+    /// the art rests centred in it, so a resting frame sits exactly where a
+    /// plain icon would.
+    ///
+    /// Centring costs half the headroom, so the highest usable lift is
+    /// `bounceHeight / 2` — ask for more and the top of the art is silently
+    /// clipped and the extra frames come out identical. Must stay under the
+    /// ~22pt a status item gets, or macOS scales the artwork down.
+    private static let bounceHeight: CGFloat = 4
+
+    /// How far the art is lifted in each frame, in pixels.
+    ///
+    /// Integers only: the art is nearest-neighbour scaled pixel art, and a
+    /// fractional lift would smear the very edges we went to trouble to keep
+    /// hard. The trailing zeros are a beat of rest, so a repeat reads as a hop
+    /// rather than a vibration.
+    static let bounceSequence: [CGFloat] = [0, 1, 2, 2, 1, 0, 0, 0]
+
+    /// The resting frame — what the menu bar shows when nothing is happening.
+    static var image: NSImage? { frames.first }
+
+    /// One image per bounce step, rendered once at startup.
+    ///
+    /// Pre-rendered because the alternative is rasterising artwork on every
+    /// animation tick, and this runs in the menu bar of an app whose whole point
+    /// is to be cheap to leave running.
+    static let frames: [NSImage] = {
         guard let url = Bundle.main.url(forResource: "MenuIcon", withExtension: "png"),
               let loaded = NSImage(contentsOf: url),
               let cg = loaded.cgImage(forProposedRect: nil, context: nil, hints: nil)
-        else { return nil }
+        else { return [] }
 
         // Artwork often has transparent padding around the subject. Scaling the
         // padded canvas to menu bar height shrinks the subject; trim first so it
@@ -30,20 +56,25 @@ enum MenuIcon {
 
         let aspect = CGFloat(cropped.width) / CGFloat(cropped.height)
         let artWidth = (targetHeight * aspect).rounded()
-        let img = NSImage(size: NSSize(width: artWidth + trailingGap, height: targetHeight),
-                          flipped: false) { _ in
-            guard let ctx = NSGraphicsContext.current else { return false }
-            // Nearest-neighbour here too — this draw is what rasterises the
-            // artwork, so smoothing it now would blur the pixels before SwiftUI
-            // ever sees the image.
-            ctx.imageInterpolation = .none
-            ctx.cgContext.draw(cropped,
-                               in: CGRect(x: 0, y: 0, width: artWidth, height: targetHeight))
-            return true
+        let size = NSSize(width: artWidth + trailingGap, height: targetHeight + bounceHeight)
+
+        return bounceSequence.map { lift in
+            let img = NSImage(size: size, flipped: false) { _ in
+                guard let ctx = NSGraphicsContext.current else { return false }
+                // Nearest-neighbour here too — this draw is what rasterises the
+                // artwork, so smoothing it now would blur the pixels before
+                // SwiftUI ever sees the image.
+                ctx.imageInterpolation = .none
+                ctx.cgContext.draw(cropped, in: CGRect(x: 0,
+                                                       y: bounceHeight / 2 + lift,
+                                                       width: artWidth,
+                                                       height: targetHeight))
+                return true
+            }
+            // Keep the artwork's own colors instead of flattening to a template.
+            img.isTemplate = false
+            return img
         }
-        // Keep the artwork's own colors instead of flattening to a template.
-        img.isTemplate = false
-        return img
     }()
 
     /// Returns the image cropped to the bounding box of pixels with alpha > 0.

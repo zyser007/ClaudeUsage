@@ -5,6 +5,7 @@ struct ClaudeUsageApp: App {
     @StateObject private var store = UsageStore()
     @StateObject private var quota = QuotaStore()
     @StateObject private var launch = LaunchAtLogin()
+    @StateObject private var bounce = IconBounce()
 
     init() {
         if CommandLine.arguments.contains("--dump") {
@@ -28,10 +29,11 @@ struct ClaudeUsageApp: App {
         MenuBarExtra {
             MenuContentView(store: store, quota: quota, launch: launch)
         } label: {
-            if let icon = MenuIcon.image {
+            if !MenuIcon.frames.isEmpty {
                 // Nearest-neighbour keeps pixel art crisp instead of smearing
                 // it when scaled to menu bar height.
-                Image(nsImage: icon).interpolation(.none)
+                Image(nsImage: MenuIcon.frames[min(bounce.frame, MenuIcon.frames.count - 1)])
+                    .interpolation(.none)
             } else {
                 // Fallback: SF Symbol, not a unicode glyph — U+2301 renders as
                 // a stray arrow in the menu bar font.
@@ -47,6 +49,13 @@ struct ClaudeUsageApp: App {
                     store.start()
                     quota.start()
                     launch.refresh()
+                }
+                // Hop while the CLI is being driven — roughly a second, every
+                // six minutes, plus whenever Refresh is pressed. That makes the
+                // animation a signal that work is happening rather than
+                // decoration, and keeps the timer off the rest of the time.
+                .onChange(of: quota.isRefreshingLive) { _, busy in
+                    busy ? bounce.start() : bounce.stop()
                 }
         }
         .menuBarExtraStyle(.window)
