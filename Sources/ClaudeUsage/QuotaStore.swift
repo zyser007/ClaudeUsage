@@ -32,6 +32,10 @@ final class QuotaStore: ObservableObject {
         .appendingPathComponent(".claude.json")
     private var timer: Timer?
     private var liveTimer: Timer?
+    /// Set once a run reports expired auth. The 6-minute auto-refresh can't fix
+    /// that — only the user re-signing in can — so it stops spawning until an
+    /// explicit Refresh clears the flag by succeeding.
+    private var authBlocked = false
 
     /// A snapshot older than this has stopped tracking reality.
     ///
@@ -164,21 +168,50 @@ final class QuotaStore: ObservableObject {
     ///   CLI's own throttle may still serve cache, so this isn't a guarantee.
     func liveRefresh(force: Bool = false) {
         guard !isRefreshingLive, let path = Self.cliPath else { return }
+        // A manual Refresh always tries — that's how the user retries after
+        // re-signing in. The automatic path skips while auth is known broken.
+        if !force && authBlocked { return }
         if !force, let fetchedAt,
            Date().timeIntervalSince(fetchedAt) < Self.refreshInterval { return }
         isRefreshingLive = true
         liveError = nil
         Task.detached(priority: .userInitiated) {
-            let error = Self.runUsageCommand(path: path)
+            let outcome = Self.runUsageCommand(path: path)
             await MainActor.run {
                 self.isRefreshingLive = false
-                self.liveError = error
+                self.liveError = outcome.errorMessage
+                self.authBlocked = outcome.isAuthExpired
                 self.refresh()
             }
         }
     }
 
-    nonisolated private static func runUsageCommand(path: String) -> String? {
+    /// The result of one `claude -p "/usage"` run.
+    ///
+    /// `authExpired` is called out on its own because it is the one failure the
+    /// user can act on (re-sign-in) and the one retrying can't fix — both the
+    /// message and the back-off in liveRefresh() key off it.
+    enum RefreshOutcome {
+        case success
+        case authExpired
+        case failed(String)
+
+        var errorMessage: String? {
+            switch self {
+            case .success: return nil
+            case .authExpired:
+                return "Claude Code sign-in expired — run `claude` in a terminal and sign in again."
+            case .failed(let m): return m
+            }
+        }
+
+        var isAuthExpired: Bool {
+            if case .authExpired = self { return true }
+            return false
+        }
+    }
+
+    nonisolated private static func runUsageCommand(path: String) -> RefreshOutcome {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: path)
         // Nothing about /usage depends on a workspace, so give the CLI as little
@@ -186,14 +219,18 @@ final class QuotaStore: ObservableObject {
         // of the user's customizations. Without this it inherits `/` and scans.
         process.arguments = ["-p", "/usage", "--safe-mode", "--no-session-persistence"]
         process.currentDirectoryURL = cliWorkingDirectory
-        // We want the side effect, not the text. Null out stdin too so the CLI
-        // can't block waiting on a terminal that isn't there.
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
+        // Capture the output rather than discard it: the exit code is 0 even
+        // when auth fails, so the text is the only way to tell a real refresh
+        // from a silent no-op, and the only way to surface why. stderr is merged
+        // into the same pipe so one scan covers both. The panel is ~1KB, well
+        // under the pipe buffer, so reading after exit can't deadlock.
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
         process.standardInput = FileHandle.nullDevice
 
         do { try process.run() } catch {
-            return "Couldn't run claude: \(error.localizedDescription)"
+            return .failed("Couldn't run claude: \(error.localizedDescription)")
         }
 
         // Watchdog: measured runs finish in 1–3s. A hung CLI must not leak a
@@ -202,11 +239,54 @@ final class QuotaStore: ObservableObject {
         while process.isRunning, Date() < deadline { usleep(100_000) }
         if process.isRunning {
             process.terminate()
-            return "claude -p /usage hung for over 20s"
+            return .failed("claude -p /usage hung for over 20s")
         }
-        return process.terminationStatus == 0
-            ? nil
-            : "claude -p /usage failed (exit \(process.terminationStatus))"
+
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        let output = String(decoding: data, as: UTF8.self)
+
+        // Success signal is the panel, not the exit code. "Current session"
+        // prints on every good run — including a throttled one served from
+        // cache — and is absent on every failure.
+        if output.contains("Current session") { return .success }
+
+        // The /usage output doesn't say *why* it failed: logged out, it just
+        // prints a cost summary with no auth wording at all (verified by
+        // logging out and capturing it). So ask the CLI directly rather than
+        // guess from text. This second spawn only runs on the failure path.
+        if isLoggedOut(path: path) { return .authExpired }
+
+        let firstLine = output.split(separator: "\n").first.map(String.init) ?? "no output"
+        return .failed("claude -p /usage: \(firstLine)")
+    }
+
+    /// Asks `claude auth status` whether the session is signed out.
+    ///
+    /// `loggedIn` is a plain boolean in its JSON — the reliable signal the
+    /// /usage panel doesn't give. Any trouble reading it returns false, so an
+    /// unrelated hiccup is reported as a generic failure, not a false "sign in
+    /// again" that would send the user chasing the wrong problem.
+    nonisolated private static func isLoggedOut(path: String) -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: path)
+        process.arguments = ["auth", "status"]
+        process.currentDirectoryURL = cliWorkingDirectory
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        process.standardInput = FileHandle.nullDevice
+
+        do { try process.run() } catch { return false }
+
+        let deadline = Date().addingTimeInterval(10)
+        while process.isRunning, Date() < deadline { usleep(50_000) }
+        if process.isRunning { process.terminate(); return false }
+
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let loggedIn = obj["loggedIn"] as? Bool
+        else { return false }
+        return !loggedIn
     }
 
     func refresh() {
@@ -288,9 +368,13 @@ final class QuotaStore: ObservableObject {
         print("before: \(before.map { "\(Int(Date().timeIntervalSince($0)))s ago" } ?? "—")")
 
         let started = Date()
-        let error = runUsageCommand(path: path)
+        let outcome = runUsageCommand(path: path)
         print("took: \(String(format: "%.2f", Date().timeIntervalSince(started)))s")
-        print("error: \(error ?? "none")")
+        switch outcome {
+        case .success: print("outcome: success")
+        case .authExpired: print("outcome: authExpired — \(outcome.errorMessage ?? "")")
+        case .failed(let m): print("outcome: failed — \(m)")
+        }
 
         let after = read(url: url).fetchedAt
         print("after:  \(after.map { "\(Int(Date().timeIntervalSince($0)))s ago" } ?? "—")")

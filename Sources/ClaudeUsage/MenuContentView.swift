@@ -109,13 +109,19 @@ struct MenuContentView: View {
     }
 
     private func quotaRow(_ limit: QuotaLimit) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
+        // If the reset time has already passed, this limit's cycle rolled over
+        // since the snapshot: the percentage isn't merely old, it's for a window
+        // that no longer exists (an 11-hour-old "Session 0%" is the giveaway).
+        // Mute it rather than let a dead number read as current, and drop the
+        // severity alert — a red 95% from a spent cycle would be a false alarm.
+        let expired = limit.resetsAt.map { $0 < Date() } ?? false
+        return VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 4) {
                 Text(limit.label).font(.caption)
                 Spacer()
                 // Icon carries the alert too — colour alone excludes anyone who
                 // can't distinguish the orange/red bar from the blue one.
-                if let symbol = severitySymbol(limit) {
+                if !expired, let symbol = severitySymbol(limit) {
                     Image(systemName: symbol)
                         .font(.system(size: 9))
                         .foregroundStyle(barColor(limit))
@@ -123,6 +129,7 @@ struct MenuContentView: View {
                 Text("\(limit.percent)%")
                     .font(.caption.weight(.medium))
                     .monospacedDigit()
+                    .opacity(expired ? 0.35 : 1)
             }
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
@@ -137,8 +144,10 @@ struct MenuContentView: View {
                 }
             }
             .frame(height: 5)
+            .opacity(expired ? 0.35 : 1)
             if let resets = limit.resetsAt {
-                Text("Resets in \(Format.until(resets))")
+                Text(expired ? "Cycle reset — awaiting update"
+                             : "Resets in \(Format.until(resets))")
                     .font(.system(size: 9))
                     .foregroundStyle(.secondary)
             }
